@@ -1,10 +1,6 @@
-from app.services.gmail_service import get_emails_from_last_24_hours
+import uvicorn
 
-emails = get_emails_from_last_24_hours()
-
-print("\n--- MAILSMART 24-HOUR EMAIL CHECK ---\n")
-for e in emails:
-    print("📩 From:", e['from'])
-    print("📝 Subject:", e['subject'])
-    print("🔍 Snippet:", e['snippet'])
-    print("-----")
+if __name__ == "__main__":
+    port = 8000
+    print(f"\n🚀 MailSmart API live on http://127.0.0.1:{port} (Swagger docs: /docs)\n")
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=True)
