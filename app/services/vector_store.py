@@ -1,49 +1,68 @@
+# app/services/vector_store.py
 import os
+import uuid
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
+from qdrant_client.http import models
+from app.services.embeddings import get_embedding
 
 load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-EMB_MODEL = os.getenv("EMB_MODEL", "all-MiniLM-L6-v2")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "mailsmart_emails")
 
-# Init clients
-qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-embedder = SentenceTransformer(EMB_MODEL)
 
-COLLECTION_NAME = "emails"
+# init client
+def _get_client():
+    if QDRANT_API_KEY:
+        return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    return QdrantClient(url=QDRANT_URL)
+
 
 def ensure_collection():
-    """Ensure emails collection exists"""
-    from qdrant_client.http import models
-    qdrant.recreate_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE)
-    )
+    client = _get_client()
+    try:
+        client.get_collection(COLLECTION_NAME)
+    except Exception:
+        # create with vector size 384 for all-MiniLM-L6-v2
+        client.recreate_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE)
+        )
+
 
 def upsert_emails(emails: list):
-    """Store emails in Qdrant"""
-    vectors = embedder.encode([e['subject'] + " " + e['snippet'] for e in emails])
-    payloads = [
-        {"from": e['from'], "subject": e['subject'], "snippet": e['snippet']}
-        for e in emails
-    ]
-    qdrant.upsert(
-        collection_name=COLLECTION_NAME,
-        points=[
-            {"id": i, "vector": vec.tolist(), "payload": payload}
-            for i, (vec, payload) in enumerate(zip(vectors, payloads))
-        ]
-    )
+    """Insert or update emails into Qdrant with deterministic UUIDs"""
+    client = _get_client()
+    ensure_collection()
+    points = []
+    for idx, e in enumerate(emails):
+        doc_text = f"{e.get('from','')}\n{e.get('subject','')}\n{e.get('snippet','')}"
+        vec = get_embedding(doc_text)
+        payload = {
+            "from": e.get("from"),
+            "subject": e.get("subject"),
+            "snippet": e.get("snippet")
+        }
+        # ✅ Convert Gmail ID (string) → deterministic UUID
+        raw_id = str(e.get("id", idx))
+        safe_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, raw_id))
+        points.append(models.PointStruct(id=safe_id, vector=vec, payload=payload))
+    client.upsert(collection_name=COLLECTION_NAME, points=points)
+
 
 def search_emails(query: str, top_k: int = 5):
-    """Retrieve most relevant emails using semantic search"""
-    vector = embedder.encode([query])[0]
-    results = qdrant.search(
+    client = _get_client()
+    ensure_collection()
+    q_vec = get_embedding(query)
+    results = client.search(
         collection_name=COLLECTION_NAME,
-        query_vector=vector.tolist(),
-        limit=top_k
+        query_vector=q_vec,
+        limit=top_k,
+        with_payload=True
     )
-    return [hit.payload for hit in results]
+    out = []
+    for r in results:
+        out.append({"id": r.id, "score": r.score, "payload": r.payload})
+    return out

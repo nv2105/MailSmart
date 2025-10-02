@@ -1,6 +1,13 @@
-venv/
-pycache/
+# python
+__pycache__/
 *.pyc
+venv/
 .env
 token.json
-credentials/client_secret.json
+logs/
+*.sqlite3
+
+# VSCode
+.vscode/
+
+test.py
