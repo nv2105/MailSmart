@@ -4,20 +4,17 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
 load_dotenv()
-
-# Load embedding model from .env
 EMB_MODEL = os.getenv("EMB_MODEL", "all-MiniLM-L6-v2")
+
+# load model once
 _model = SentenceTransformer(EMB_MODEL)
 
-def get_embedding(text: str) -> list:
-    """
-    Generate embeddings using SentenceTransformer model.
-    """
-    return _model.encode(text).tolist()
+def get_embedding(text: str):
+    # returns list[float]
+    vec = _model.encode(text, show_progress_bar=False)
+    return vec.tolist()
 
-def email_to_embedding(email: dict) -> list:
-    """
-    Converts an email dict into an embedding vector.
-    """
-    text = f"From: {email['from']}\nSubject: {email['subject']}\nSnippet: {email['snippet']}"
+def email_to_embedding(email: dict):
+    # convert email dict to single text then embedding
+    text = f"From: {email.get('from','')}\nSubject: {email.get('subject','')}\nSnippet: {email.get('snippet','')}"
     return get_embedding(text)

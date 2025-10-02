@@ -1,0 +1,43 @@
+<!-- app/templates/history.html -->
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>MailSmart - History</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  </head>
+  <body class="bg-light">
+    <div class="container py-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>📬 MailSmart - Summaries</h1>
+        <form action="/run-now" method="post">
+          <button class="btn btn-primary">Run Now</button>
+        </form>
+      </div>
+
+      {% if summaries %}
+        {% for s in summaries %}
+          <div class="card mb-3">
+            <div class="card-body">
+              <h6 class="card-subtitle mb-2 text-muted">Run at {{ s.time }}</h6>
+              <ul>
+                {% for p in s.summary.summary_of_emails %}
+                  <li>{{ p }}</li>
+                {% endfor %}
+              </ul>
+              <h6>Actions</h6>
+              <ul>
+                {% for a in s.summary.actions %}
+                  <li>{{ a.name }} — {{ a.action }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="alert alert-info">No summaries yet. Click Run Now to generate one.</div>
+      {% endif %}
+    </div>
+  </body>
+</html>
