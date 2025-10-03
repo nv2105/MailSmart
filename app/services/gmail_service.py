@@ -35,7 +35,7 @@ def authenticate_gmail(force_refresh: bool = False):
 def get_emails_from_last_24_hours(max_results: int = 20, debug: bool = False):
     # Fetches emails from the last 24 hours
     service = authenticate_gmail()
-    query = 'newer_than:1d'
+    query = "newer_than:1d in:all"
     try:
         results = service.users().messages().list(userId='me', q=query, maxResults=max_results).execute()
         messages = results.get('messages', [])

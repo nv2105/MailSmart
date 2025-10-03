@@ -2,131 +2,84 @@
 import os
 import glob
 import json
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from datetime import datetime
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.templating import Jinja2Templates
-from fastapi import Body
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
+from contextlib import asynccontextmanager
 
-
-# import services
-from app.services.digest_runner import run_and_email_digest
-from app.services.gmail_service import get_emails_from_last_24_hours, authenticate_gmail
-from app.services.summarizer import run_rag_daily, summarize_emails_direct
-from app.services.vector_store import search_emails
+# services (your existing project services)
 from app.services.scheduler import start_scheduler
+from app.services.vector_store import search_emails
+from app.services.digest_runner import run_and_email_digest
+from app.services.summarizer import run_rag_daily, summarize_emails_direct
+from app.services.gmail_service import get_emails_from_last_24_hours, authenticate_gmail
 
-# templates directory
+# templates + static
 templates = Jinja2Templates(directory="app/templates")
+app = FastAPI(title="MailSmart API", version="1.0.0")
+
+# static files mounted
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 ESSENTIAL_PATH = "config/essential.json"
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+SCHEDULE_HOUR = int(os.getenv("SCHEDULE_HOUR", 7))
+SCHEDULE_MINUTE = int(os.getenv("SCHEDULE_MINUTE", 0))
 
-# lifespan to start scheduler (modern FastAPI pattern)
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # start scheduler in background (safe to call; it will return quickly)
+async def lifespan(app_: FastAPI):
+    # start scheduler on startup (safe: will not start again if already running)
     try:
         start_scheduler()
     except Exception as e:
         print("⚠️ Scheduler failed to start:", e)
     yield
-    # no special shutdown actions for now
 
-app = FastAPI(
-    title="MailSmart API",
-    description="AI-powered 24-hour Email Summarizer (Gmail + Groq + Gemini fallback)",
-    version="1.0.0",
-    lifespan=lifespan
-)
 
-# root
-@app.get("/")
-def root():
-    return {"message": "Welcome to MailSmart API 🚀"}
+app.router.lifespan_context = lifespan  # attach lifespan
 
-# raw emails endpoint
-@app.get("/raw-emails", summary="Fetch raw emails", description="Returns last 24h Gmail emails (From, Subject, Snippet).")
-def raw_emails(limit: int = 10):
-    try:
-        emails = get_emails_from_last_24_hours(max_results=limit)
-        return {"emails": emails}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gmail fetch failed: {str(e)}")
 
-# RAG / Summarize endpoint (regenerate forces a live run)
-@app.get("/summarize", summary="Fetch RAG-powered summarized emails")
-def summarize_endpoint(regenerate: bool = False, limit: int = 20):
-    try:
-        if regenerate:
-            # run full RAG pipeline: fetch -> index -> summarize -> save
-            summary = run_rag_daily(max_results=limit)
-            return {"summary": summary}
-        # else read latest log file if present
-        files = sorted(glob.glob("logs/summary_*.json"), reverse=True)
-        if files:
-            with open(files[0], "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return {"summary": data.get("summary")}
-        # fallback to live run
-        summary = run_rag_daily(max_results=limit)
-        return {"summary": summary}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# --------------------
+# Helpers
+# --------------------
+def load_summaries():
+    summaries = []
+    log_dir = LOG_DIR or "logs"
+    if os.path.exists(log_dir):
+        for fname in sorted(os.listdir(log_dir), reverse=True):
+            if fname.endswith(".json"):
+                fpath = os.path.join(log_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
 
-# direct summarize (send emails list in request body if needed)
-@app.post("/summarize/direct", summary="Summarize given emails payload")
-def summarize_direct(payload: dict):
-    try:
-        # payload expected: {"emails": [ {from, subject, snippet}, ... ]}
-        emails = payload.get("emails", [])
-        summary = summarize_emails_direct(emails)
-        return {"summary": summary}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                # normalize keys
+                data.setdefault("run_time", fname.replace("summary_", "").replace(".json", ""))
+                
+                emails = data.get("summary", {}).get("summary_of_emails", [])
+                normalized_emails = []
 
-# search in Qdrant semantic store
-@app.get("/search", summary="Semantic search over indexed emails")
-def search(q: str, top_k: int = 5):
-    try:
-        hits = search_emails(q, top_k=top_k)
-        return {"query": q, "results": hits}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                for e in emails:
+                    if isinstance(e, dict):
+                        normalized_emails.append({
+                            "summary": e.get("summary", ""),
+                            "sender": e.get("sender", "Unknown")
+                        })
+                    elif isinstance(e, str):
+                        normalized_emails.append({
+                            "summary": e,
+                            "sender": "Unknown"
+                        })
 
-# auth endpoint to force Gmail re-login
-@app.get("/auth", summary="Force Gmail re-login")
-def auth():
-    try:
-        authenticate_gmail(force_refresh=True)
-        return {"status": "✅ Gmail authentication successful, token.json refreshed"}
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Gmail auth failed: {str(e)}")
-
-# history dashboard (simple)
-@app.get("/history", response_class=HTMLResponse, summary="Summary run history")
-def history(request: Request, limit: int = 20):
-    files = sorted(glob.glob("logs/summary_*.json"), reverse=True)[:limit]
-    data = []
-    for fpath in files:
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                data.append(json.load(f))
-        except Exception:
-            continue
-    return templates.TemplateResponse("history.html", {"request": request, "summaries": data})
-
-# manual run-now endpoint for UI button (POST)
-@app.post("/run-now", summary="Manual trigger to fetch+summarize and send digest")
-def run_now():
-    """
-    Manual trigger to fetch emails, summarize, format digest,
-    and send digest email to all senders.
-    """
-    try:
-        summary = run_and_email_digest()
-        return JSONResponse({"status": "ok", "summary": summary})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                data["total_emails"] = len(emails)
+                data["important_emails"] = normalized_emails
+                summaries.append(data)
+    return summaries
 
 
 
@@ -137,25 +90,150 @@ def load_essentials():
     with open(ESSENTIAL_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def save_essentials(data):
     os.makedirs("config", exist_ok=True)
     with open(ESSENTIAL_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-@app.get("/essentials", summary="Get list of essential senders")
-def get_essentials():
-    return load_essentials()
 
-@app.post("/essentials/add", summary="Add a new essential sender")
-def add_essential(sender: str = Body(..., embed=True)):
+# --------------------
+# Routes (UI)
+# --------------------
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    """Landing page (hero)"""
+    return templates.TemplateResponse(
+        "home.html",
+        {
+            "request": request,
+            "current_year": datetime.now().year
+        }
+    )
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    """Dashboard with run-now button and chart/table"""
+    summaries = load_summaries()
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "summaries": summaries,
+            "current_year": datetime.now().year
+        }
+    )
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history(request: Request):
+    """History listing of saved runs"""
+    history = load_summaries()
+    return templates.TemplateResponse(
+        "history.html",
+        {
+            "request": request,
+            "history": history,
+            "current_year": datetime.now().year
+        }
+    )
+
+
+@app.get("/essentials", response_class=HTMLResponse)
+async def essentials_page(request: Request):
+    """UI page to view/add/remove essential senders"""
+    data = load_essentials()
+    return templates.TemplateResponse(
+        "essentials.html",
+        {
+            "request": request,
+            "essentials": data.get("senders", []),
+            "current_year": datetime.now().year
+        }
+    )
+
+
+# --------------------
+# API endpoints used by UI & program logic
+# --------------------
+@app.post("/run-now")
+def run_now():
+    """Manual trigger: fetch -> summarize -> send digest. returns JSON."""
+    try:
+        result = run_and_email_digest()
+        return JSONResponse({"status": "ok", "summary": result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/raw-emails")
+def raw_emails(limit: int = 10):
+    try:
+        return {"emails": get_emails_from_last_24_hours(max_results=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/summarize")
+def summarize_endpoint(regenerate: bool = False, limit: int = 20):
+    try:
+        if regenerate:
+            return {"summary": run_rag_daily(max_results=limit)}
+        files = sorted(glob.glob(os.path.join(LOG_DIR, "summary_*.json")), reverse=True)
+        if files:
+            with open(files[0], "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return {"summary": data.get("summary")}
+        return {"summary": run_rag_daily(max_results=limit)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/summarize/direct")
+def summarize_direct(payload: dict):
+    try:
+        emails = payload.get("emails", [])
+        return {"summary": summarize_emails_direct(emails)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/search")
+def search(q: str, top_k: int = 5):
+    try:
+        return {"query": q, "results": search_emails(q, top_k=top_k)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/auth")
+def auth():
+    try:
+        authenticate_gmail(force_refresh=True)
+        return {"status": "Gmail auth success"}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+# Essentials add/remove endpoints used by UI (JSON)
+@app.post("/api/essentials/add")
+def api_add_essential(body: dict = Body(...)):
+    sender = body.get("sender")
+    if not sender:
+        raise HTTPException(status_code=400, detail="Missing sender field")
     data = load_essentials()
     if sender not in data["senders"]:
         data["senders"].append(sender)
         save_essentials(data)
     return {"status": "added", "senders": data["senders"]}
 
-@app.post("/essentials/remove", summary="Remove an essential sender")
-def remove_essential(sender: str = Body(..., embed=True)):
+
+@app.post("/api/essentials/remove")
+def api_remove_essential(body: dict = Body(...)):
+    sender = body.get("sender")
+    if not sender:
+        raise HTTPException(status_code=400, detail="Missing sender field")
     data = load_essentials()
     data["senders"] = [s for s in data["senders"] if s != sender]
     save_essentials(data)
