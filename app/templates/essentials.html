@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>⭐ Essentials</h1>
+
+<div class="card">
+  <p>Manage your essential email senders below:</p>
+
+  <!-- Input to add sender -->
+  <div style="margin-top: 1rem;">
+    <input type="text" id="newSender" placeholder="Enter sender email..." style="padding:0.5rem; width:250px; border-radius:6px; border:1px solid #ccc;">
+    <button id="addSenderBtn" class="run-btn" style="padding:0.5rem 1rem; font-size:1rem;">➕ Add</button>
+  </div>
+
+  <!-- List of current essential senders -->
+  <ul id="essentialsList" style="margin-top:1.5rem; list-style:none; padding:0;">
+    {% for sender in essentials %}
+      <li style="background:#f9f9f9; padding:0.8rem; margin-bottom:0.5rem; border-radius:6px; display:flex; justify-content:space-between; align-items:center;">
+        <span>{{ sender }}</span>
+        <button class="remove-btn" data-sender="{{ sender }}" style="background:#ff4d4d; border:none; color:white; padding:0.3rem 0.8rem; border-radius:5px; cursor:pointer;">Remove</button>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast"></div>
+
+<script>
+const toast = document.getElementById("toast");
+
+// Show toast
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 2500);
+}
+
+// Add new sender
+document.getElementById("addSenderBtn").addEventListener("click", async () => {
+  const input = document.getElementById("newSender");
+  const sender = input.value.trim();
+  if (!sender) return showToast("Please enter a sender email.");
+
+  const res = await fetch("/api/essentials/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sender })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    input.value = "";
+    updateEssentialsList(data.senders);
+    showToast("Sender added successfully!");
+  } else {
+    showToast(data.detail || "Failed to add sender.");
+  }
+});
+
+// Remove sender
+async function removeSender(sender) {
+  const res = await fetch("/api/essentials/remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sender })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    updateEssentialsList(data.senders);
+    showToast("Sender removed successfully!");
+  } else {
+    showToast(data.detail || "Failed to remove sender.");
+  }
+}
+
+// Update list UI
+function updateEssentialsList(senders) {
+  const list = document.getElementById("essentialsList");
+  list.innerHTML = "";
+  senders.forEach(sender => {
+    const li = document.createElement("li");
+    li.style = "background:#f9f9f9; padding:0.8rem; margin-bottom:0.5rem; border-radius:6px; display:flex; justify-content:space-between; align-items:center;";
+    li.innerHTML = `<span>${sender}</span>
+      <button class="remove-btn" data-sender="${sender}" style="background:#ff4d4d; border:none; color:white; padding:0.3rem 0.8rem; border-radius:5px; cursor:pointer;">Remove</button>`;
+    list.appendChild(li);
+
+    li.querySelector(".remove-btn").addEventListener("click", () => removeSender(sender));
+  });
+}
+</script>
+{% endblock %}

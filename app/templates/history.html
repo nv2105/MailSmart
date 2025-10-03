@@ -1,43 +1,61 @@
-<!-- app/templates/history.html -->
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>MailSmart - History</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
-  </head>
-  <body class="bg-light">
-    <div class="container py-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1>📬 MailSmart - Summaries</h1>
-        <form action="/run-now" method="post">
-          <button class="btn btn-primary">Run Now</button>
-        </form>
-      </div>
+{% extends "base.html" %}
+{% block content %}
+<h1>📜 History of Summaries</h1>
 
-      {% if summaries %}
-        {% for s in summaries %}
-          <div class="card mb-3">
-            <div class="card-body">
-              <h6 class="card-subtitle mb-2 text-muted">Run at {{ s.time }}</h6>
-              <ul>
-                {% for p in s.summary.summary_of_emails %}
-                  <li>{{ p }}</li>
-                {% endfor %}
-              </ul>
-              <h6>Actions</h6>
-              <ul>
-                {% for a in s.summary.actions %}
-                  <li>{{ a.name }} — {{ a.action }}</li>
-                {% endfor %}
-              </ul>
-            </div>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="alert alert-info">No summaries yet. Click Run Now to generate one.</div>
-      {% endif %}
-    </div>
-  </body>
-</html>
+{% if history %}
+  <ul class="history-list">
+    {% for h in history %}
+      <li>
+        <h3>{{ h.run_time }}</h3>
+        <p><strong>Total Emails:</strong> {{ h.total_emails }}</p>
+        <p><strong>Important Emails:</strong> {{ h.important_emails|length }}</p>
+
+        {% if h.important_emails %}
+          <p><strong>Top Summaries:</strong></p>
+          <ul>
+            {% for email in h.important_emails[:5] %}
+              <li><strong>{{ email.sender }}</strong> - {{ email.subject|truncate(50, True) }}<br>{{ email.summary|truncate(100, True) }}</li>
+            {% endfor %}
+          </ul>
+
+          {% if h.important_emails|length > 5 %}
+            <button class="toggle-btn" onclick="toggleDetails('details-{{ loop.index }}')">Show All</button>
+            <ul id="details-{{ loop.index }}" style="display:none;">
+              {% for email in h.important_emails[5:] %}
+                <li><strong>{{ email.sender }}</strong> - {{ email.subject|truncate(50, True) }}<br>{{ email.summary }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% else %}
+          <p>No important summaries for this run.</p>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p>No history available yet.</p>
+{% endif %}
+
+<!-- Toast notification -->
+<div id="toast" class="toast">Summary loaded successfully!</div>
+
+<script>
+function toggleDetails(id) {
+  const el = document.getElementById(id);
+  if (el.style.display === "none") {
+    el.style.display = "block";
+  } else {
+    el.style.display = "none";
+  }
+}
+
+// Optional: show toast on page load if there is history
+window.addEventListener("DOMContentLoaded", () => {
+  if ({{ history|length }} > 0) {
+    const toast = document.getElementById("toast");
+    toast.classList.add("show");
+    setTimeout(() => toast.classList.remove("show"), 3000);
+  }
+});
+</script>
+{% endblock %}

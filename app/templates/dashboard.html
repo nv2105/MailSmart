@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>📊 Dashboard</h1>
+
+<!-- Run Now Button -->
+<button id="runNowBtn" class="run-btn">⚡ Run Now</button>
+<p id="runStatus"></p>
+
+<!-- Latest Digest -->
+<section class="stats">
+  <h2>Latest Digest</h2>
+  {% if summaries %}
+    {% set latest = summaries[0] %}
+    <p><strong>Run Time:</strong> {{ latest.run_time }}</p>
+    <p><strong>Total Emails:</strong> {{ latest.total_emails }}</p>
+    <p><strong>Important Emails:</strong> {{ latest.important_emails|length }}</p>
+  {% else %}
+    <p>No summaries yet.</p>
+  {% endif %}
+</section>
+
+<!-- Chart -->
+<canvas id="summaryChart" width="400" height="200"></canvas>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const runBtn = document.getElementById("runNowBtn");
+const runStatus = document.getElementById("runStatus");
+let isRunning = false; // 🔹 track running state
+
+runBtn.addEventListener("click", async () => {
+  if (isRunning) return; // ignore extra clicks
+  isRunning = true;
+
+  runBtn.disabled = true;
+  runBtn.textContent = "⏳ Running...";
+  runStatus.textContent = "";
+
+  try {
+    const res = await fetch("/run-now", { method: "POST" });
+    if (!res.ok) throw new Error("Digest run failed");
+    const data = await res.json();
+
+    const count = data.summary.summary_of_emails.length || 0;
+    showToast(`✅ Digest completed! Summarized ${count} emails.`);
+  } catch (err) {
+    console.error(err);
+    showToast("⚠️ Something went wrong while running the digest.");
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = "⚡ Run Now";
+    isRunning = false; // reset flag
+  }
+});
+
+// Toast function
+function showToast(message, duration = 3000) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), duration);
+}
+
+
+  // Chart placeholder
+  const ctx = document.getElementById("summaryChart");
+  const chart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["Work", "Promotions", "Banking", "Other"],
+      datasets: [{
+        data: [12, 5, 3, 7],
+        backgroundColor: ["#4CAF50", "#FF9800", "#2196F3", "#9C27B0"]
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+</script>
+{% endblock %}

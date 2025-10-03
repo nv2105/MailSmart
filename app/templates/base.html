@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MailSmart</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Header with logo -->
+  <header class="topbar">
+    <span class="logo" onclick="window.location.href='/'">📧 MailSmart</span>
+    <nav>
+      <a href="/dashboard" class="{% if active=='dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/history" class="{% if active=='history' %}active{% endif %}">History</a>
+      <a href="/essentials" class="{% if active=='essentials' %}active{% endif %}">Essentials</a>
+      <a href="/auth">Auth</a>
+    </nav>
+  </header>
+
+  <main class="ms-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="ms-footer">
+    <p>&copy; {{ current_year }} MailSmart</p>
+  </footer>
+</body>
+</html>
