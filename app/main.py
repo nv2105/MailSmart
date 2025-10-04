@@ -16,6 +16,24 @@ from app.services.digest_runner import run_and_email_digest
 from app.services.summarizer import run_rag_daily, summarize_emails_direct
 from app.services.gmail_service import get_emails_from_last_24_hours, authenticate_gmail
 
+# --- Render secret loader ---
+from app.secret_loader import ensure_secret_file
+
+# Resolve client_secret.json and token.json paths for Render
+client_secret_path = ensure_secret_file(
+    "GOOGLE_CLIENT_SECRET_FILE", "credentials/client_secret.json", "GOOGLE_CLIENT_SECRET_JSON_B64"
+)
+token_path = ensure_secret_file(
+    "GOOGLE_TOKEN_FILE", "token.json", "GOOGLE_TOKEN_JSON_B64"
+)
+
+# Set env vars so gmail_service.py can pick them up
+if client_secret_path:
+    os.environ["GOOGLE_CLIENT_SECRET_FILE"] = client_secret_path
+if token_path:
+    os.environ["GOOGLE_TOKEN_FILE"] = token_path
+
+
 # templates + static
 templates = Jinja2Templates(directory="app/templates")
 app = FastAPI(title="MailSmart API", version="1.0.0")
