@@ -1,8 +1,8 @@
 # app/services/gmail_service.py
 import os
 import json
+import base64
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from fastapi import HTTPException
 
@@ -12,38 +12,37 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send"
 ]
 
-# Token path for refresh token storage
-TOKEN_PATH = os.getenv("GMAIL_TOKEN", "token.json")
-
-def authenticate_gmail(force_refresh: bool = False):
+def authenticate_gmail():
     """
-    Authenticate with Gmail API.
-    For Render deployment, load client_secret from environment variable.
+    Authenticate Gmail API headlessly using Base64 env variables.
     """
-    creds = None
-
-    # Load token if it exists and no force_refresh
-    if os.path.exists(TOKEN_PATH) and not force_refresh:
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-    else:
-        # Get credentials JSON from environment variable
-        client_secret_json = os.getenv("GMAIL_CLIENT_SECRET_JSON")
-        if not client_secret_json:
-            raise HTTPException(status_code=500, detail="GMAIL_CLIENT_SECRET_JSON not set in environment")
-
-        creds_dict = json.loads(client_secret_json)
-
-        # Run OAuth flow
-        flow = InstalledAppFlow.from_client_config(creds_dict, SCOPES)
-        creds = flow.run_local_server(port=0)
-
-        # Save token for future use
-        with open(TOKEN_PATH, "w", encoding="utf-8") as token_file:
-            token_file.write(creds.to_json())
-
     try:
+        # Load token from Base64 env variable
+        token_b64 = os.getenv("GOOGLE_TOKEN_JSON_B64")
+        if not token_b64:
+            raise HTTPException(status_code=500, detail="GOOGLE_TOKEN_JSON_B64 not set in environment")
+        token_json = base64.b64decode(token_b64).decode("utf-8")
+        token_dict = json.loads(token_json)
+
+        # Load client secret from Base64 env variable
+        client_b64 = os.getenv("GOOGLE_CLIENT_SECRET_JSON_B64")
+        if not client_b64:
+            raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_SECRET_JSON_B64 not set in environment")
+        client_json = base64.b64decode(client_b64).decode("utf-8")
+        client_dict = json.loads(client_json)
+
+        # Build credentials object
+        creds = Credentials.from_authorized_user_info(info=token_dict, scopes=SCOPES)
+
+        # Add client_id and client_secret for refresh
+        client_info = client_dict.get("installed", client_dict.get("web", {}))
+        creds.client_id = client_info.get("client_id")
+        creds.client_secret = client_info.get("client_secret")
+
+        # Build Gmail service
         service = build("gmail", "v1", credentials=creds)
         return service
+
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Gmail authentication failed: {str(e)}")
 
