@@ -4,8 +4,9 @@ import json
 import base64
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from fastapi import HTTPException
 from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from fastapi import HTTPException
 
 # Gmail scopes
 SCOPES = [
@@ -13,58 +14,60 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send"
 ]
 
-# Local paths (for local dev/presentation)
+# Local paths (for local dev / presentation)
 LOCAL_CLIENT_PATH = "credentials/client_secret.json"
 LOCAL_TOKEN_PATH = "token.json"
 
-def authenticate_gmail(force_refresh: bool = False):
+
+def authenticate_gmail(force_refresh: bool = False, interactive: bool = False):
     """
     Authenticate Gmail API:
-    1. Uses local JSON files if they exist (for presentation/local testing)
-    2. Falls back to Base64 env variables (for headless deployment)
-    Supports force_refresh for refreshing access token.
+    - Local JSON files take priority (for local testing / presentation)
+    - Falls back to Base64 env variables (for headless deployment)
+    - If interactive=True, opens browser OAuth to change account
     """
     try:
         creds = None
 
-        # --- 1️⃣ Check local token file ---
+        # 1️⃣ Try local token first
         if os.path.exists(LOCAL_TOKEN_PATH) and not force_refresh:
             creds = Credentials.from_authorized_user_file(LOCAL_TOKEN_PATH, SCOPES)
-            client_dict = None
-            if os.path.exists(LOCAL_CLIENT_PATH):
-                with open(LOCAL_CLIENT_PATH, "r", encoding="utf-8") as f:
-                    client_dict = json.load(f)
-            if client_dict:
-                client_info = client_dict.get("installed", client_dict.get("web", {}))
-                creds.client_id = client_info.get("client_id")
-                creds.client_secret = client_info.get("client_secret")
 
+        # 2️⃣ If no local token, try Base64 env
         else:
-            # --- 2️⃣ Use Base64 environment variables ---
             token_b64 = os.getenv("GOOGLE_TOKEN_JSON_B64")
             client_b64 = os.getenv("GOOGLE_CLIENT_SECRET_JSON_B64")
-
             if not token_b64 or not client_b64:
                 raise HTTPException(
                     status_code=500,
-                    detail="No local files or Base64 env variables found for Gmail auth"
+                    detail="No local token or Base64 env variables found for Gmail auth"
                 )
 
             token_json = base64.b64decode(token_b64).decode("utf-8")
             token_dict = json.loads(token_json)
 
-            client_json = base64.b64decode(client_b64).decode("utf-8")
-            client_dict = json.loads(client_json)
-
             creds = Credentials.from_authorized_user_info(info=token_dict, scopes=SCOPES)
-            client_info = client_dict.get("installed", client_dict.get("web", {}))
-            creds.client_id = client_info.get("client_id")
-            creds.client_secret = client_info.get("client_secret")
 
-        # --- 3️⃣ Refresh token if expired ---
-        if force_refresh or not creds.valid:
-            if creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+        # 3️⃣ If interactive requested or force_refresh, run OAuth flow
+        if interactive or force_refresh or not creds.valid:
+            # Load client secret for OAuth
+            if os.path.exists(LOCAL_CLIENT_PATH):
+                with open(LOCAL_CLIENT_PATH, "r", encoding="utf-8") as f:
+                    client_dict = json.load(f)
+            else:
+                client_json = base64.b64decode(os.getenv("GOOGLE_CLIENT_SECRET_JSON_B64")).decode("utf-8")
+                client_dict = json.loads(client_json)
+
+            flow = InstalledAppFlow.from_client_config(client_dict, SCOPES)
+            creds = flow.run_local_server(port=0)  # <-- opens browser
+
+            # Save token for future use
+            with open(LOCAL_TOKEN_PATH, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+
+        # 4️⃣ Refresh if expired
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
 
         # Build Gmail service
         service = build("gmail", "v1", credentials=creds)

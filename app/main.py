@@ -102,6 +102,10 @@ def run_now():
 
 @app.get("/raw-emails")
 def raw_emails(limit: int = 10):
+    """
+    Fetch recent emails (last 24 hours) using Gmail API.
+    Works locally or on deployment headlessly.
+    """
     try:
         return {"emails": get_emails_from_last_24_hours(max_results=limit)}
     except Exception as e:
@@ -138,13 +142,18 @@ def search(q: str, top_k: int = 5):
 
 # --- ✅ Gmail Auth Endpoints ---
 @app.get("/auth")
-def auth():
+def auth(interactive: bool = False):
+    """
+    Gmail authentication endpoint.
+    - interactive=False: headless, just uses saved token/env
+    - interactive=True: opens OAuth browser to allow user change
+    """
     try:
-        # force_refresh=True ensures token refresh on Render
-        authenticate_gmail(force_refresh=True)
+        authenticate_gmail(force_refresh=interactive, interactive=interactive)
         return {"status": "Gmail auth success"}
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
+
 
 # Essentials add/remove
 @app.post("/api/essentials/add")
