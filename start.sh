@@ -1,15 +1,7 @@
-#!/bin/bash
-# start.sh for Render deployment
-# Runs MailSmart FastAPI app with Gunicorn
+#!/usr/bin/env bash
+set -o errexit  # stop on error
 
-# optional: print environment variables for debug
-echo "LOG_DIR=$LOG_DIR"
-echo "GOOGLE_CLIENT_SECRET_FILE=$GOOGLE_CLIENT_SECRET_FILE"
-echo "GOOGLE_TOKEN_FILE=$GOOGLE_TOKEN_FILE"
+echo "🚀 Starting MailSmart FastAPI app on Render..."
 
-# start app
-exec gunicorn app.main:app \
-    --bind 0.0.0.0:$PORT \
-    --workers 1 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 120
+# Render provides a dynamic $PORT environment variable
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

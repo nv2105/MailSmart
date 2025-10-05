@@ -13,3 +13,6 @@ logs/
 test.py
 credentials/
 client_secret.json
+
+token.b64.txt
+client_secret.b64.txt
