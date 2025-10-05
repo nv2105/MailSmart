@@ -1,56 +1,74 @@
 # app/services/gmail_service.py
 import os
-from dotenv import load_dotenv
+import json
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from fastapi import HTTPException
 
-load_dotenv()
-
-# Gmail scope readonly
+# Gmail scopes
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",  # still needed for reading
-    "https://www.googleapis.com/auth/gmail.send"       # needed for sending emails
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send"
 ]
-CREDENTIALS_PATH = os.getenv("GMAIL_CREDENTIALS", "credentials/client_secret.json")
+
+# Token path for refresh token storage
 TOKEN_PATH = os.getenv("GMAIL_TOKEN", "token.json")
 
 def authenticate_gmail(force_refresh: bool = False):
-    # Handles OAuth and returns authorized Gmail API service
+    """
+    Authenticate with Gmail API.
+    For Render deployment, load client_secret from environment variable.
+    """
     creds = None
+
+    # Load token if it exists and no force_refresh
+    if os.path.exists(TOKEN_PATH) and not force_refresh:
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    else:
+        # Get credentials JSON from environment variable
+        client_secret_json = os.getenv("GMAIL_CLIENT_SECRET_JSON")
+        if not client_secret_json:
+            raise HTTPException(status_code=500, detail="GMAIL_CLIENT_SECRET_JSON not set in environment")
+
+        creds_dict = json.loads(client_secret_json)
+
+        # Run OAuth flow
+        flow = InstalledAppFlow.from_client_config(creds_dict, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+        # Save token for future use
+        with open(TOKEN_PATH, "w", encoding="utf-8") as token_file:
+            token_file.write(creds.to_json())
+
     try:
-        if os.path.exists(TOKEN_PATH) and not force_refresh:
-            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0)
-            with open(TOKEN_PATH, "w", encoding="utf-8") as token:
-                token.write(creds.to_json())
-        service = build('gmail', 'v1', credentials=creds)
+        service = build("gmail", "v1", credentials=creds)
         return service
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Gmail authentication failed: {str(e)}")
 
+
 def get_emails_from_last_24_hours(max_results: int = 20, debug: bool = False):
-    # Fetches emails from the last 24 hours
+    """
+    Fetch emails from the last 24 hours using Gmail API.
+    """
     service = authenticate_gmail()
-    query = 'newer_than:1d'
+    query = "newer_than:1d in:all"
     try:
-        results = service.users().messages().list(userId='me', q=query, maxResults=max_results).execute()
-        messages = results.get('messages', [])
+        results = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
+        messages = results.get("messages", [])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gmail API list error: {e}")
 
     email_data = []
     for m in messages:
         try:
-            msg_detail = service.users().messages().get(userId='me', id=m['id']).execute()
-            headers = msg_detail.get('payload', {}).get('headers', [])
-            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown Sender')
-            snippet = msg_detail.get('snippet', '')
-            email_data.append({'from': sender, 'subject': subject, 'snippet': snippet, 'id': m['id']})
+            msg_detail = service.users().messages().get(userId="me", id=m["id"]).execute()
+            headers = msg_detail.get("payload", {}).get("headers", [])
+            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
+            sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
+            snippet = msg_detail.get("snippet", "")
+            email_data.append({"from": sender, "subject": subject, "snippet": snippet, "id": m["id"]})
         except Exception:
             continue
 
